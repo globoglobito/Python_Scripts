@@ -8,21 +8,25 @@ import psycopg2
 import smtplib
 import ssl
 import logging
+import argparse
 
 timestamp_of_script = '{:%Y-%m-%d %H:%M:%S}'.format(datetime.datetime.now())
-logFile = os.path.join(os.getcwd(), "WebScrapper.log")
 
+# A very basic logger that dumps information into a file.
+log_file = os.path.join(os.getcwd(), "WebScrapper.log")
 logger = logging.getLogger("WebScrapper")
 logger.setLevel(logging.INFO)
+file_logger = logging.FileHandler(log_file, mode='a')
+file_logger.setLevel(logging.INFO)
+logger.addHandler(file_logger)
 
-fileLogger = logging.FileHandler(logFile, mode='a')
-fileLogger.setLevel(logging.INFO)
-logger.addHandler(fileLogger)
 
-conn = psycopg2.connect(dbname="postgres", user="postgres", password="potatopatato", host='localhost', port='4321')
-cur = conn.cursor()
 
-pages_dictionary2 = {"coolmod": ["https://www.coolmod.com/asus-turbo-geforce-rtx-3090-24gb-gddr6x-tarjeta-grafica"
+
+# These are the web pages I decided to scrape for information. The information we need to scrape the data is:
+# The URL of the web page, the class where the name of the GPU is stored, the class where the price is stored, and
+# the class where the buy button is stored (this is our availability condition, as unless there is stock it wont appear)
+pages_dictionary = {"coolmod": ["https://www.coolmod.com/asus-turbo-geforce-rtx-3090-24gb-gddr6x-tarjeta-grafica"
                                  "-precio", "product-first-part", "text-price-total", "button-buy"],
                      "coolmod2": [
                          "https://www.coolmod.com/evga-geforce-rtx-3090-xc3-black-gaming-24gb-gddr6x-tarjeta-grafica-precio",
@@ -33,33 +37,39 @@ pages_dictionary2 = {"coolmod": ["https://www.coolmod.com/asus-turbo-geforce-rtx
                      "coolmod4": [
                          "https://www.coolmod.com/evga-geforce-rtx-3090-xc3-ultra-gaming-24gb-gddr6x-tarjeta-grafica-precio",
                          "product-first-part", "text-price-total", "button-buy"],
-                     "ibertronica": ["https://www.ibertronica.es/asus-rtx-3090-turbo-24gb-gddr6x",
+                    "ibertronica": ["https://www.ibertronica.es/asus-rtx-3090-turbo-24gb-gddr6x",
                                      "mb-3 h2 product-title", "col-6 ng-tns-c1-1 ng-star-inserted",
                                      "btn btn-outline-primary btn-block m-0 mb-3"],
-                     "xtremmedia": ["https://www.xtremmedia.com/Asus_Turbo_GeForce_RTX_3090_24GB_GDDR6X.html",
+                    "xtremmedia": ["https://www.xtremmedia.com/Asus_Turbo_GeForce_RTX_3090_24GB_GDDR6X.html",
                                     "ficha-titulo", "offerDetails article-list-pvp", "article-carrito2", "precio"],
-                     "xtremmedia2": [
+                    "xtremmedia2": [
                          "https://www.xtremmedia.com/EVGA_GeForce_RTX_3090_XC3_Ultra_Gaming_24GB_GDDR6X.html",
                          "ficha-titulo", "offerDetails article-list-pvp", "article-carrito2", "precio"],
-                     "pccomponentes": ["https://www.pccomponentes.com/asus-turbo-geforce-rtx-3090-24gb-gddr6x", "h4",
+                    "pccomponentes": ["https://www.pccomponentes.com/asus-turbo-geforce-rtx-3090-24gb-gddr6x", "h4",
                                        "baseprice",
                                        "btn btn-primary btn-lg buy GTM-addToCart buy-button js-article-buy"],
-                     "pccomponentes2": [
+                    "pccomponentes2": [
                          "https://www.pccomponentes.com/evga-geforce-rtx-3090-xc3-black-gaming-24gb-gdddr6x", "h4",
                          "baseprice", "btn btn-primary btn-lg buy GTM-addToCart buy-button js-article-buy"],
-                     "pccomponentes3": ["https://www.pccomponentes.com/evga-geforce-rtx-3090-xc3-gaming-24gb-gddr6x",
+                    "pccomponentes3": ["https://www.pccomponentes.com/evga-geforce-rtx-3090-xc3-gaming-24gb-gddr6x",
                                         "h4", "baseprice",
                                         "btn btn-primary btn-lg buy GTM-addToCart buy-button js-article-buy"],
-                     "pccomponentes4": [
+                    "pccomponentes4": [
                          "https://www.pccomponentes.com/evga-geforce-rtx-3090-xc3-ultra-gaming-24gb-gddr6x", "h4",
                          "baseprice", "btn btn-primary btn-lg buy GTM-addToCart buy-button js-article-buy"]}
 
 
+
+
+
 # Note for docker:
-# Since we have postgres client in local and it uses port 5432, we must bind another port when creating our container.
-# In this case : docker run -d -p 4321:5432 --name PostgresDB -e POSTGRES_PASSWORD=potatopatato postgres
+# Since we have a postgres client in local and it uses port 5432, we must bind another port when creating our container.
+# In this case : docker run -d -p 4321:5432 ...... and so on
 
 def get_product_details(urls, name_class, price_class, instock_class, alternate_price_class=None):
+    """ Receives 4-5 inputs, and returns a dictionary with the scrapped information.
+        The function extracts the relevant information of the url provided (price, name, availability),
+        it then cleans and formats the information so that it can be dumped into a relational DB"""
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
                       "Chrome/88.0.4324.104 Safari/537.36 "
@@ -109,12 +119,12 @@ def get_product_details(urls, name_class, price_class, instock_class, alternate_
             logger.info(f"{urls} scrapped successfully @ {timestamp}")
         except Exception as ex:
             logger.warning(f"Exception caught @ get_product_details :{ex}")
-            #print("Error: " + str(ex))
             details = None
     return details
 
 
 def iterate_webpages(dictionary):
+    """ Helper function to iterate over our pages directory using the get_products_details function"""
     if not dictionary:
         logger.warning(f"Nothing to scrap, ending script")
         sys.exit(1)
@@ -130,6 +140,7 @@ def iterate_webpages(dictionary):
 
 
 def create_message(scrapped_data):
+    """ A simple function that creates the message to be sent in an email if the conditions are met."""
     message = ""
     for dic in scrapped_data:
         if dic["in_stock"] and dic["deal"]:
@@ -138,29 +149,52 @@ def create_message(scrapped_data):
     return message
 
 
-def send_email(message):
-    port = 465  # For SSL
-    smtp_server = "smtp.gmail.com"
-    sender_email = "******@gmail.com"  # Enter sender address
-    password = "*****"  # sender password
-    receiver_email = "******@gmail.com"  # Enter receiver address
+def send_email(message, config):
+    """ This function sends the actual email should the conditions be met."""
+    try:
+        with open(config) as reader:
+            lines = reader.read().splitlines()
+        port = 465  # For SSL
+        smtp_server = lines[0]
+        sender_email = lines[1]
+        password = lines[2]
+        receiver_email = lines[3]
+        print(smtp_server, sender_email, password, receiver_email)
 
-    message_to_send = f"Subject: Price Alert \n\n {message}"
-    message_to_send = re.sub(r'[^\x00-\x7F]+', ' ', message_to_send)
+        message_to_send = f"Subject: Price Alert \n\n {message}"
+        message_to_send = re.sub(r'[^\x00-\x7F]+', ' ', message_to_send)  # Quick and dirty regex to remove non ascii chars.
 
-    context = ssl.create_default_context()
-    with smtplib.SMTP_SSL(smtp_server, port, context=context) as server:
-        server.login(sender_email, password)
-        server.sendmail(sender_email, receiver_email, message_to_send)
+        context = ssl.create_default_context()
+        with smtplib.SMTP_SSL(smtp_server, port, context=context) as server:
+            server.login(sender_email, password)
+            server.sendmail(sender_email, receiver_email, message_to_send)
+    except Exception as ex:
+        logger.warning(f"Exception caught when trying to send an email @ send_email():{ex}")
 
 
-def do_insert(rec):
+def do_insert(rec, config):
+    """ This function inserts the scrapped data into our Postgres DB, should an exception occur the function will
+        rollback the transaction and continue with the rest."""
+    try:
+        with open(config) as reader:
+            lines = reader.read().splitlines()
+        db_name = lines[0]
+        username = lines[1]
+        password = lines[2]
+        ip_address = lines[3]
+        port = lines[4]
+        conn = psycopg2.connect(dbname=db_name, user=username, password=password, host=ip_address, port=port)
+        cur = conn.cursor()
+    except Exception as ex:
+        logger.warning(f"Exception caught when reading config file @ do_insert():{ex}")
+        sys.exit(1)
+
     for dictionary in rec:
         try:
             cols = dictionary.keys()
             cols_str = ','.join(cols)
             values_to_insert = [dictionary[k] for k in cols]
-            values_wildcards = ','.join(['%s' for i in range(len(values_to_insert))])
+            values_wildcards = ','.join(['%s' for i in range(len(values_to_insert))])  # -> %s,%s,%s,%s,%s,%s,%s
             sql_str = f"INSERT INTO scrapped_data ({cols_str}) VALUES ({values_wildcards}) ON CONFLICT DO NOTHING"
             cur.execute(sql_str, values_to_insert)
             conn.commit()
@@ -171,14 +205,27 @@ def do_insert(rec):
 
 
 def main():
-    scrapped_data = iterate_webpages(pages_dictionary2)
+    scrapped_data = iterate_webpages(pages_dictionary)
     email = create_message(scrapped_data)
     if email:
-        send_email(email)
-    do_insert(scrapped_data)
+        send_email(email, config_path)
+    do_insert(scrapped_data, pg_config_path)
     logger.info(f"We are done! @ {timestamp_of_script}")
 
 
 if __name__ == "__main__":
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("email_config_file",
+                        type=str,
+                        help="a text file with email_config parameters for sending the email")
+    parser.add_argument("postgres_config_file",
+                        type=str,
+                        help="a text file with email_config parameters connecting to our postgres db")
+    args = parser.parse_args()
+    pwd = os.getcwd()
+    config_path = os.path.join(pwd, args.email_config_file)
+    pg_config_path = os.path.join(pwd, args.postgres_config_file)
+
     main()
 
